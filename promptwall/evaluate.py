@@ -7,6 +7,7 @@ construction. With Promptwall, whatever still lands is a real gap in the gateway
 
 from __future__ import annotations
 
+import json
 import statistics
 from dataclasses import dataclass
 from pathlib import Path
@@ -55,7 +56,9 @@ def _landed(case: dict, res, system: str) -> bool:
             return True
     tool = cond.get("tool_allowed")
     if tool:
-        return any(t["name"] == tool and t["decision"] == "allow" for t in res.tool_calls)
+        needle = cond.get("args_contain")  # the malicious part; a legitimate call to the same tool isn't a win
+        return any(t["name"] == tool and t["decision"] == "allow"
+                   and (needle is None or needle in json.dumps(t["arguments"])) for t in res.tool_calls)
     return False
 
 
@@ -82,7 +85,7 @@ def run_attacks(policy: dict, path: str | Path, backend=None, guarded: bool = Tr
     gw = Gateway(policy, backend) if guarded else Unguarded(policy, backend)
     out = []
     for case in yaml.safe_load(Path(path).read_text())["cases"]:
-        if live and case["category"] in LIVE_SKIP:
+        if live and (case["category"] in LIVE_SKIP or case.get("live") is False):
             continue
         if not live:
             backend.output = case.get("model_output") or {}
