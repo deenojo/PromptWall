@@ -2,7 +2,7 @@
 
 **LLM Runtime Guard**: a security gateway that sits between your app and the model and inspects every request, response and tool call.
 
-> Built as a proof of concept for *AI runtime security on production LLM features*. Companion to [Patchwarden](https://github.com/deenojo/Vuln-Remediation-Agent).
+> Built as a proof of concept for *AI runtime security on production LLM features*. Companion to [Patchwarden](https://github.com/deenojo/Vulnerability-Remediation-Agent).
 
 ```
  app ──► Promptwall ──────────────────────────────────────────────► model
