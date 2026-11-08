@@ -87,7 +87,7 @@ def run_attacks(policy: dict, path: str | Path, backend=None, guarded: bool = Tr
         if not live:
             backend.output = case.get("model_output") or {}
         res = gw.handle(Request(case.get("user", ""), case.get("documents") or []))
-        landed = _landed(case, res, backend.last_system)
+        landed = _landed(case, res, getattr(backend, "last_system", ""))
         out.append(Outcome(case["id"], case["category"], landed, "-" if landed else _stage(res), res.latency_ms,
                            bool(case.get("known_gap"))))
     return out
