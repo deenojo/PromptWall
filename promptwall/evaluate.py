@@ -13,7 +13,7 @@ from pathlib import Path
 
 import yaml
 
-from promptwall.gateway import Gateway, Request
+from promptwall.gateway import Gateway, Request, Unguarded
 from promptwall.types import LLMResponse, ToolCall
 
 
@@ -71,12 +71,21 @@ def _stage(res) -> str:
     return "-"
 
 
-def run_attacks(policy: dict, path: str | Path) -> list[Outcome]:
-    backend = CompromisedBackend()
-    gw = Gateway(policy, backend)
+# Cases whose "win" needs data the attacker planted in the simulated model (e.g. a customer SSN);
+# a real model has no such data in context, so these only make sense in the compromised-model run.
+LIVE_SKIP = {"data_leak", "output_handling"}
+
+
+def run_attacks(policy: dict, path: str | Path, backend=None, guarded: bool = True) -> list[Outcome]:
+    live = backend is not None
+    backend = backend or CompromisedBackend()
+    gw = Gateway(policy, backend) if guarded else Unguarded(policy, backend)
     out = []
     for case in yaml.safe_load(Path(path).read_text())["cases"]:
-        backend.output = case.get("model_output") or {}
+        if live and case["category"] in LIVE_SKIP:
+            continue
+        if not live:
+            backend.output = case.get("model_output") or {}
         res = gw.handle(Request(case.get("user", ""), case.get("documents") or []))
         landed = _landed(case, res, backend.last_system)
         out.append(Outcome(case["id"], case["category"], landed, "-" if landed else _stage(res), res.latency_ms,
@@ -84,15 +93,19 @@ def run_attacks(policy: dict, path: str | Path) -> list[Outcome]:
     return out
 
 
-def run_benign(policy: dict, path: str | Path) -> list[tuple[str, bool, str, float]]:
-    backend = CompromisedBackend()
+def run_benign(policy: dict, path: str | Path, backend=None) -> list[tuple[str, bool, str, float]]:
+    live = backend is not None
+    backend = backend or CompromisedBackend()
     gw = Gateway(policy, backend)
     results = []
     for case in yaml.safe_load(Path(path).read_text())["cases"]:
-        backend.output = case.get("model_output") or {}
+        if not live:
+            backend.output = case.get("model_output") or {}
         res = gw.handle(Request(case["user"], case.get("documents") or []))
         exp = case["expect"]
         ok = res.status == exp.get("status", "ok")
+        if live:  # a real model may phrase or tool things differently: only over-blocking counts as a false positive
+            exp = {"status": exp.get("status", "ok")}
         for name, decision in (exp.get("tool") or {}).items():
             ok = ok and any(t["name"] == name and t["decision"] == decision for t in res.tool_calls)
         for s in exp.get("text_contains", []):
@@ -129,4 +142,21 @@ def report(attacks: list[Outcome], benign: list[tuple]) -> str:
         lat.sort()
         p95 = lat[min(len(lat) - 1, int(0.95 * len(lat)))]
         lines.append(f"Gateway overhead: p50 {statistics.median(lat):.2f} ms, p95 {p95:.2f} ms (excludes model latency)")
+    return "\n".join(lines)
+
+
+def live_report(alone: list[Outcome], guarded: list[Outcome], benign: list[tuple], model: str) -> str:
+    g = {o.id: o for o in guarded}
+    lines = [f"Live evaluation against a real model: {model}", "",
+             f"{'case':<36} {'category':<20} {'model alone':<12} with Promptwall"]
+    for o in alone:
+        w = g[o.id]
+        lines.append(f"{o.id:<36} {o.category:<20} {'LANDED' if o.landed else 'resisted':<12} "
+                     f"{'LANDED' if w.landed else 'stopped (' + w.stage + ')' if w.stage != '-' else 'resisted'}")
+    a, b = sum(o.landed for o in alone), sum(o.landed for o in guarded)
+    fp = [x for x in benign if not x[1]]
+    lines += ["", f"Attacks landing, model alone:     {a}/{len(alone)}",
+              f"Attacks landing, with Promptwall: {b}/{len(guarded)}",
+              f"Benign requests over-blocked: {len(fp)}/{len(benign)}"]
+    lines += [f"  over-blocked: {x[0]}: {x[2]}" for x in fp]
     return "\n".join(lines)

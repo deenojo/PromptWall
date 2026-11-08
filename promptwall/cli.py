@@ -15,9 +15,18 @@ from promptwall.gateway import load_policy
 
 
 def cmd_eval(args) -> int:
-    from promptwall.evaluate import report, run_attacks, run_benign
+    from promptwall.evaluate import live_report, report, run_attacks, run_benign
 
     policy = load_policy(args.policy)
+    if args.backend:
+        from promptwall.backends import get_backend
+
+        backend = get_backend(args.backend)
+        alone = run_attacks(policy, args.attacks, backend, guarded=False)
+        guarded = run_attacks(policy, args.attacks, backend, guarded=True)
+        benign = run_benign(policy, args.benign, backend)
+        print(live_report(alone, guarded, benign, backend.name))
+        return 0
     attacks = run_attacks(policy, args.attacks)
     benign = run_benign(policy, args.benign)
     print(report(attacks, benign))
@@ -60,6 +69,8 @@ def main(argv: list[str] | None = None) -> int:
     e = sub.add_parser("eval")
     e.add_argument("--attacks", default="eval/attacks.yaml")
     e.add_argument("--benign", default="eval/benign.yaml")
+    e.add_argument("--backend", choices=["anthropic", "ollama"],
+                   help="Live run against a real model (default: simulated compromised model)")
     e.set_defaults(func=cmd_eval)
     c = sub.add_parser("check")
     c.add_argument("text")

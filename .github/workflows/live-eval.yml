@@ -1,0 +1,38 @@
+name: live-eval
+
+# Real model, with and without Promptwall, on the same attacks + benign traffic.
+# Manual only (costs a few cents). Requires the repository secret ANTHROPIC_API_KEY.
+on:
+  workflow_dispatch:
+    inputs:
+      model:
+        description: "Claude model"
+        default: claude-haiku-5-5
+
+permissions:
+  contents: read
+
+jobs:
+  live:
+    runs-on: ubuntu-latest
+    env:
+      ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+      PROMPTWALL_MODEL: ${{ inputs.model }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - run: pip install -e ".[dev,llm]"
+      - run: test -n "$ANTHROPIC_API_KEY" || { echo "ANTHROPIC_API_KEY secret is missing"; exit 1; }
+      - name: Live eval
+        run: promptwall eval --backend anthropic | tee live-eval.txt
+      - name: Summary
+        if: always()
+        run: |
+          { echo "## Promptwall live evaluation (${PROMPTWALL_MODEL})"; echo '```'; cat live-eval.txt; echo '```'; } >> "$GITHUB_STEP_SUMMARY"
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: live-eval
+          path: live-eval.txt

