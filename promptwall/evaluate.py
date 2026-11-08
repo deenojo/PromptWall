@@ -148,18 +148,24 @@ def report(attacks: list[Outcome], benign: list[tuple]) -> str:
     return "\n".join(lines)
 
 
-def live_report(alone: list[Outcome], guarded: list[Outcome], benign: list[tuple], model: str) -> str:
-    g = {o.id: o for o in guarded}
-    lines = [f"Live evaluation against a real model: {model}", "",
-             f"{'case':<36} {'category':<20} {'model alone':<12} with Promptwall"]
-    for o in alone:
-        w = g[o.id]
-        lines.append(f"{o.id:<36} {o.category:<20} {'LANDED' if o.landed else 'resisted':<12} "
-                     f"{'LANDED' if w.landed else 'stopped (' + w.stage + ')' if w.stage != '-' else 'resisted'}")
-    a, b = sum(o.landed for o in alone), sum(o.landed for o in guarded)
-    fp = [x for x in benign if not x[1]]
-    lines += ["", f"Attacks landing, model alone:     {a}/{len(alone)}",
-              f"Attacks landing, with Promptwall: {b}/{len(guarded)}",
-              f"Benign requests over-blocked: {len(fp)}/{len(benign)}"]
-    lines += [f"  over-blocked: {x[0]}: {x[2]}" for x in fp]
+def live_report(alone: list[list[Outcome]], guarded: list[list[Outcome]], benign: list[list[tuple]], model: str) -> str:
+    """Each argument is a list of trials (real models are non-deterministic)."""
+    n = len(alone)
+    ids = [o.id for o in alone[0]]
+    cat = {o.id: o.category for o in alone[0]}
+    a_hits = {i: sum(o.landed for t in alone for o in t if o.id == i) for i in ids}
+    g_hits = {i: sum(o.landed for t in guarded for o in t if o.id == i) for i in ids}
+    stages = {i: sorted({o.stage for t in guarded for o in t if o.id == i and o.stage != "-"}) for i in ids}
+    lines = [f"Live evaluation against a real model: {model} ({n} trial{'s' if n > 1 else ''} per case)", "",
+             f"{'case':<36} {'category':<20} {'model alone':<12} {'with Promptwall':<16} stopped at"]
+    for i in ids:
+        lines.append(f"{i:<36} {cat[i]:<20} {f'{a_hits[i]}/{n} landed':<12} {f'{g_hits[i]}/{n} landed':<16} "
+                     f"{', '.join(stages[i]) or '-'}")
+    total = len(ids) * n
+    fp = sum(1 for t in benign for x in t if not x[1])
+    lines += ["", f"Attack attempts landing, model alone:     {sum(a_hits.values())}/{total}",
+              f"Attack attempts landing, with Promptwall: {sum(g_hits.values())}/{total}",
+              f"Benign requests over-blocked: {fp}/{sum(len(t) for t in benign)}"]
+    for t in benign:
+        lines += [f"  over-blocked: {x[0]}: {x[2]}" for x in t if not x[1]]
     return "\n".join(lines)

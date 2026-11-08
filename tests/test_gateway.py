@@ -119,4 +119,4 @@ def test_live_mode_compares_unguarded_vs_guarded(monkeypatch):
     assert a["direct-prompt-extraction-polite"] and not g["direct-prompt-extraction-polite"]
     benign = run_benign(POLICY, ROOT / "eval" / "benign.yaml", Obedient())
     assert all(ok for _, ok, _, _ in benign)
-    assert "with Promptwall" in live_report(alone, guarded, benign, "obedient")
+    assert "with Promptwall" in live_report([alone, alone], [guarded, guarded], [benign, benign], "obedient")
