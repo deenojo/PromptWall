@@ -1,0 +1,55 @@
+# Promptwall policy for the demo "support assistant" route.
+# The gateway enforces this file; the model cannot change it.
+
+system_prompt: >
+  You are the support assistant for Acme Store. Help customers with orders and returns.
+  Use tools only when needed. Never share other customers' data.
+
+block_message: "Sorry, I can't help with that request."
+
+injection:
+  block_threshold: 0.6      # user turn: weighted rule score at/above this is blocked
+  document_threshold: 0.4   # retrieved docs are stricter: a poisoned doc is quarantined, not obeyed
+
+documents:
+  datamark: true            # spotlighting: interleave a marker through untrusted text
+
+inbound_sensitive:          # minimize what we send to the model provider
+  enabled: true
+  mode: redact
+  kinds: ["pii:ssn", "pii:credit_card", "secret:*"]
+
+outbound_sensitive:         # what the model may say back
+  mode: redact
+  kinds: ["pii:ssn", "pii:credit_card", "pii:email", "pii:phone", "secret:*"]
+
+output:
+  allowed_link_domains: ["acme.example"]
+
+tools:
+  lookup_order:
+    description: Look up an order by its ID
+    args:
+      order_id: {type: string, required: true, pattern: "ORD-[0-9]{6}"}
+  send_email:
+    description: Email a customer
+    side_effects: true
+    args:
+      to: {type: string, required: true, email_domains: ["acme.example"]}
+      subject: {type: string, required: true, max_len: 120}
+      body: {type: string, required: true, max_len: 2000}
+  run_sql:
+    description: Read-only analytics query
+    args:
+      query: {type: string, required: true, sql_read_only: true, max_len: 500}
+  fetch_url:
+    description: Fetch a help-center page
+    args:
+      url: {type: string, required: true, url_hosts: ["help.acme.example"]}
+  issue_refund:
+    description: Refund an order
+    side_effects: true
+    requires_approval: true
+    args:
+      order_id: {type: string, required: true, pattern: "ORD-[0-9]{6}"}
+      amount: {type: number, required: true}
