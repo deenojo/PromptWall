@@ -46,6 +46,21 @@ The model's own safety training resisted every *direct* attack. The one attack t
 
 The corpus was written alongside the rules, so the 0/20 shows coverage, not robustness against new attacks. The known-gap cases are there to keep the score honest. CI fails if any covered attack starts landing or any benign request gets blocked.
 
+### NVIDIA garak red team (`eval/garak/`)
+
+An independent check with [garak](https://github.com/NVIDIA/garak), NVIDIA's open-source LLM vulnerability scanner: 370 attack prompts across 19 probes (prompt injection, injection hidden in task data, encoded payloads, jailbreaks, markdown exfiltration, XSS, terminal escape codes). Same app with and without Promptwall. Only probes with deterministic string detectors are used, so scores don't depend on a second model. The `garak` workflow re-runs it on every guard change.
+
+| Attack success | Without Promptwall | With Promptwall |
+| --- | --- | --- |
+| **Worst case:** a model that obeys every attack (measures the gateway alone, $0) | 213 / 370 (58%) | **112 / 370 (30%)** |
+| **Real Claude** (Haiku) | 78 / 370 (21%) | **60 / 370 (16%)** |
+
+What it showed:
+- **It found 3 real bugs, now fixed:** `javascript:` links were treated as same-origin and allowed through; only a short list of HTML tags was stripped, so event handlers like `onerror=` survived; terminal (ANSI) escape codes passed through. After the fix: escape codes **21/58 → 0/58** and markdown XSS/exfiltration **27/41 → 0/41** in the worst case. Each has a regression test (`tests/test_output_guard_garak.py`).
+- **Direct injection** with real Claude: 16/60 → **5/60**.
+- **Honest gaps:** injection hidden inside task data (a summary or report the user pastes) is barely caught by signatures (worst case 76/80 still land). Encoded payloads (base64/hex) aren't decoded and inspected. Echoed SQL or template code passes through: that has to be handled where the output is used, with parameterized queries and auto-escaping. These are the case for the semantic detection layer on the roadmap.
+- **Detector caveats:** garak's jailbreak detector (`mitigation.MitigationBypass`) counts any answer without a stock refusal phrase as a bypass, so it over-counts; and it doesn't recognize Promptwall's own block message as a refusal, so the summarizer counts gateway blocks as blocked. Full per-probe tables: [`eval/garak/results/`](eval/garak/results/).
+
 ## What each layer does
 
 | Layer | Threat (OWASP LLM Top 10, 2025) | How |
@@ -82,6 +97,7 @@ Backends: `anthropic` (Claude), `ollama` (local, $0) and `scripted` (tests and e
 See [WALKTHROUGH.md](WALKTHROUGH.md) for design decisions and [THREAT_MODEL.md](THREAT_MODEL.md) for threats, mitigations and residual risk.
 
 ## Roadmap
-- Semantic layer for the known gaps: an LLM-judge or classifier for paraphrased leaks and non-English injection, run only on requests the cheap layers mark uncertain
+- Semantic layer for the known gaps: an LLM-judge or classifier for paraphrased leaks, non-English injection and injection hidden in task data (garak: `latentinjection`), run only on requests the cheap layers mark uncertain
+- Decode-and-inspect for base64 / hex / ROT13 payloads (garak: `encoding`)
 - Named-entity PII (names, addresses) with a lightweight NER model
 - Per-route policies and per-user rate limits (LLM10, unbounded consumption)
