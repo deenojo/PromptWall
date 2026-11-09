@@ -36,12 +36,12 @@ class ScriptedBackend:
 
 
 class AnthropicBackend:
-    def __init__(self, model: str | None = None, max_tokens: int = 1024):
+    def __init__(self, model: str | None = None, max_tokens: int | None = None):
         import anthropic
 
         self.client = anthropic.Anthropic()
         self.model = model or os.environ.get("PROMPTWALL_MODEL", "claude-haiku-5-5")
-        self.max_tokens = max_tokens
+        self.max_tokens = max_tokens or int(os.environ.get("PROMPTWALL_MAX_TOKENS", "1024"))
         self.name = f"anthropic:{self.model}"
 
     def complete(self, system, messages, tools):

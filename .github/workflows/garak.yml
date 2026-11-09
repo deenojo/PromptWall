@@ -1,0 +1,71 @@
+name: garak
+
+# NVIDIA garak red team against the same app with and without Promptwall.
+#  - echo:      a worst-case model that obeys every attack. $0, no secrets. Measures the gateway alone.
+#  - anthropic: real Claude. Manual only; needs the ANTHROPIC_API_KEY secret (a dollar or two at most).
+on:
+  workflow_dispatch:
+    inputs:
+      real_model:
+        description: "Also run against real Claude (uses ANTHROPIC_API_KEY)"
+        type: boolean
+        default: true
+      model:
+        description: "Claude model"
+        default: claude-haiku-5-5
+  push:
+    paths: ["eval/garak/**", "promptwall/guards/**", ".github/workflows/garak.yml"]
+
+permissions:
+  contents: read
+
+jobs:
+  garak:
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    env:
+      PROMPTWALL_MODEL: ${{ inputs.model || 'claude-haiku-5-5' }}
+      PROMPTWALL_MAX_TOKENS: "300"
+      PYTHONPATH: ${{ github.workspace }}/eval/garak
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - run: pip install -e ".[llm]" "garak==0.17.1"
+      - name: Worst case (echo model, $0)
+        env:
+          PROMPTWALL_BACKEND: echo
+        run: |
+          for t in unguarded guarded; do
+            python -m garak --config eval/garak/garak.yaml --target_type function.Single \
+              --target_name pw_target#$t --report_prefix echo-$t > /dev/null
+          done
+          R=~/.local/share/garak/garak_runs
+          python eval/garak/summarize.py $R/echo-unguarded.report.jsonl $R/echo-guarded.report.jsonl \
+            --title "Worst case: a model that obeys every attack (gateway alone)" | tee echo.md
+      - name: Real Claude
+        if: ${{ github.event_name == 'workflow_dispatch' && inputs.real_model }}
+        env:
+          PROMPTWALL_BACKEND: anthropic
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+        run: |
+          test -n "$ANTHROPIC_API_KEY" || { echo "ANTHROPIC_API_KEY secret is missing"; exit 1; }
+          for t in unguarded guarded; do
+            python -m garak --config eval/garak/garak.yaml --target_type function.Single \
+              --target_name pw_target#$t --report_prefix claude-$t > /dev/null 2> claude-$t.err || true
+            echo "$t errors: $(grep -c PW_GARAK_ERROR claude-$t.err || true)"; grep -m3 PW_GARAK_ERROR claude-$t.err || true
+          done
+          R=~/.local/share/garak/garak_runs
+          python eval/garak/summarize.py $R/claude-unguarded.report.jsonl $R/claude-guarded.report.jsonl \
+            --title "Real model: ${PROMPTWALL_MODEL}" | tee claude.md
+      - name: Summary
+        if: always()
+        run: cat echo.md claude.md 2>/dev/null >> "$GITHUB_STEP_SUMMARY" || true
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: garak-results
+          path: |
+            *.md
+            ~/.local/share/garak/garak_runs/

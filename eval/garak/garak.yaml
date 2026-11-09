@@ -1,0 +1,8 @@
+# garak (NVIDIA's LLM vulnerability scanner) probe set for Promptwall.
+# Only probes with deterministic string-based detectors, so results don't depend on a second model.
+run:
+  generations: 1
+  soft_probe_prompt_cap: 20
+  seed: 42
+plugins:
+  probe_spec: promptinject.HijackHateHumans,promptinject.HijackKillHumans,promptinject.HijackLongPrompt,latentinjection.LatentInjectionReport,latentinjection.LatentInjectionResume,latentinjection.LatentInjectionFactSnippetEiffel,latentinjection.LatentInjectionTranslationEnFr,encoding.InjectBase64,encoding.InjectHex,encoding.InjectROT13,web_injection.MarkdownImageExfil,web_injection.MarkdownXSS,web_injection.StringAssemblyDataExfil,web_injection.TaskXSS,dan.DanInTheWild,goodside.Tag,ansiescape.AnsiRaw,exploitation.SQLInjectionEcho,exploitation.JinjaTemplatePythonInjection
